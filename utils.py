@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 import torch.utils.data as data
 import torchvision.transforms as transforms
+from sklearn.model_selection import train_test_split
 
 # Reproductabilidade
 random.seed(42)
@@ -70,9 +71,33 @@ class ButterflyDataset(data.Dataset):
         return image, label
 
 
-# Carregamento
+# Carregamento — dataset completo (usado no EDA)
 img_dir = os.path.join(path, 'train')
 df = pd.read_csv(os.path.join(path, 'train.csv'))
 
 dataset = ButterflyDataset(df=df, img_dir=img_dir, transform=data_transform)
 dataloader = data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+NUM_CLASSES = len(dataset.classes)
+
+# Split estratificado 80/20
+train_df, val_df = train_test_split(
+    df, test_size=0.2, random_state=42, stratify=df['label']
+)
+
+# Datasets de treino e validação
+train_dataset = ButterflyDataset(
+    df=train_df, img_dir=img_dir, transform=data_transform
+)
+val_dataset = ButterflyDataset(
+    df=val_df, img_dir=img_dir, transform=data_transform
+)
+
+# shuffle=True: ordem aleatória a cada epoch (evita padrões espúrios)
+train_loader = data.DataLoader(
+    train_dataset, batch_size=BATCH_SIZE, shuffle=True
+)
+# shuffle=False: ordem fixa — na validação não se aprende, só se avalia
+val_loader = data.DataLoader(
+    val_dataset, batch_size=BATCH_SIZE, shuffle=False
+)
