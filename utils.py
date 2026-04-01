@@ -101,3 +101,11 @@ train_loader = data.DataLoader(
 val_loader = data.DataLoader(
     val_dataset, batch_size=BATCH_SIZE, shuffle=False
 )
+
+# Device
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
