@@ -10,20 +10,19 @@ import torchvision.transforms as transforms
 from sklearn.model_selection import train_test_split
 
 # Reproductabilidade
-random.seed(42)
-np.random.seed(42)
-torch.manual_seed(42)
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 # Path
-try:
-    import kagglehub
-    kagglehub.login()
-    path = kagglehub.competition_download('aca-butterflies')
-    print("Path to dataset files:", path)
-
-except ImportError as e:
-    from pathlib import Path
-    path = Path().cwd() / "aca-butterflies"
+path = "./aca-butterflies"
 
 # Constantes
 BATCH_SIZE = 32
