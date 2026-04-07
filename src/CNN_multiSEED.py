@@ -288,6 +288,26 @@ experiments = [
 ]
 
 # =============================================================================
+# TEST DATASET (used for per-run submissions)
+# =============================================================================
+
+class TestDataset(data.Dataset):
+    def __init__(self, filenames, img_dir, transform=None):
+        self.filenames = filenames
+        self.img_dir   = img_dir
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.filenames)
+
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.img_dir, self.filenames[idx])
+        image    = Image.open(img_path).convert("RGB")
+        if self.transform:
+            image = self.transform(image)
+        return image
+
+# =============================================================================
 # MAIN LOOP
 # =============================================================================
 
@@ -401,6 +421,39 @@ for SEED in SEEDS:
                 "loss_name": loss_name,
             }
 
+        # Submit this run to Kaggle
+        df_full      = pd.read_csv(os.path.join(PATH, "train.csv"))
+        all_classes  = sorted(df_full["label"].unique())
+        idx_to_class = {cls: idx for idx, cls in enumerate(all_classes)}
+        int_to_class = {v: k for k, v in idx_to_class.items()}
+
+        _, val_transform_sub = build_transforms(RGB_MEAN, RGB_STD)
+        test_dir       = os.path.join(PATH, "test")
+        test_filenames = sorted(os.listdir(test_dir))
+
+        test_dataset = TestDataset(test_filenames, test_dir, val_transform_sub)
+        test_loader_sub = data.DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False,
+                                          num_workers=0, pin_memory=False)
+
+        run_preds = []
+        with torch.no_grad():
+            for images in test_loader_sub:
+                images  = images.to(run_device)
+                outputs = model(images)
+                preds   = outputs.argmax(dim=1).cpu().numpy()
+                run_preds.extend([int_to_class[p] for p in preds])
+
+        submission_dir  = "../submissions_CNN"
+        os.makedirs(submission_dir, exist_ok=True)
+        submission_path = f"{submission_dir}/{run_name}_seed{SEED}_submission.csv"
+        pd.DataFrame({"filename": test_filenames, "label": run_preds}).to_csv(submission_path, index=False)
+        print(f"Submission saved: {submission_path}")
+
+        submit_to_kaggle(
+            file_path=submission_path,
+            message=f"{run_name} seed={SEED} F1={metrics['f1_macro']:.4f}"
+        )
+
     print("\n TEMPOS DE EXECUÇÃO:")
     for key, value in all_times.items():
         print(f"{key} -> {value:.2f} min")
@@ -415,59 +468,74 @@ print("\n\nFULL RESULTS:")
 print(results_df.to_string(index=False))
 
 # =============================================================================
-# SUBMISSION WITH BEST CHECKPOINT
+# SEED 2026 — load existing checkpoints, generate submissions, compare
 # =============================================================================
 
-print(f"\nBest checkpoint: {best_ckpt_info['run_name']} "
-      f"(seed={best_ckpt_info['seed']}, F1-macro={best_f1:.4f})")
-
-best_run_device = device
-best_model = best_ckpt_info["model_fn"]().to(best_run_device)
-ckpt = torch.load(best_ckpt_info["ckpt_path"], map_location=best_run_device, weights_only=False)
-best_model.load_state_dict(ckpt["model_state"])
-best_model.eval()
+ckpt_2026_dir   = "../checkpoints_CNN/checkpoints_2026"
+relevant_2026   = {
+    "alexnet_pre_cel_adam"   : lambda: AlexNetPretrained(),
+    "vgg16_pre_cel_adam"     : lambda: VGG16Pretrained(),
+    "vgg16_pre_cel_rmsprop"  : lambda: VGG16Pretrained(),
+    "alexnet_pre_cel_rmsprop": lambda: AlexNetPretrained(),
+}
 
 df_full      = pd.read_csv(os.path.join(PATH, "train.csv"))
 all_classes  = sorted(df_full["label"].unique())
 idx_to_class = {cls: idx for idx, cls in enumerate(all_classes)}
 int_to_class = {v: k for k, v in idx_to_class.items()}
-
-class TestDataset(data.Dataset):
-    def __init__(self, filenames, img_dir, transform=None):
-        self.filenames = filenames
-        self.img_dir   = img_dir
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.filenames)
-
-    def __getitem__(self, idx):
-        img_path = os.path.join(self.img_dir, self.filenames[idx])
-        image    = Image.open(img_path).convert("RGB")
-        if self.transform:
-            image = self.transform(image)
-        return image
-
+_, val_transform_2026 = build_transforms(RGB_MEAN, RGB_STD)
 test_dir       = os.path.join(PATH, "test")
 test_filenames = sorted(os.listdir(test_dir))
 
-test_dataset = TestDataset(test_filenames, test_dir, val_transform)
-test_loader  = data.DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False,
-                                num_workers=0, pin_memory=False)
+if os.path.exists(ckpt_2026_dir):
+    for run_name, model_fn in relevant_2026.items():
+        ckpt_path = os.path.join(ckpt_2026_dir, f"{run_name}.pt")
+        if not os.path.exists(ckpt_path):
+            print(f"[SKIP] {ckpt_path} not found")
+            continue
 
-all_preds = []
-with torch.no_grad():
-    for images in test_loader:
-        images  = images.to(best_run_device)
-        outputs = best_model(images)
-        preds   = outputs.argmax(dim=1).cpu().numpy()
-        all_preds.extend([int_to_class[p] for p in preds])
+        ckpt  = torch.load(ckpt_path, map_location=device, weights_only=False)
+        f1    = ckpt["metrics"]["f1_macro"]
+        print(f"[Seed 2026] {run_name} -> F1-macro: {f1:.4f}")
 
-submission = pd.DataFrame({"filename": test_filenames, "label": all_preds})
-submission.to_csv("submission.csv", index=False)
-print(f"Submission saved: submission.csv ({len(submission)} rows)")
+        # Generate submission for this checkpoint
+        model_2026 = model_fn().to(device)
+        model_2026.load_state_dict(ckpt["model_state"])
+        model_2026.eval()
 
-submit_to_kaggle(
-    file_path="submission.csv",
-    message=f"Seed experiments - best: {best_ckpt_info['run_name']} seed={best_ckpt_info['seed']} F1={best_f1:.4f}"
-)
+        test_dataset_2026 = TestDataset(test_filenames, test_dir, val_transform_2026)
+        test_loader_2026  = data.DataLoader(test_dataset_2026, batch_size=BATCH_SIZE,
+                                            shuffle=False, num_workers=0, pin_memory=False)
+        run_preds = []
+        with torch.no_grad():
+            for images in test_loader_2026:
+                images  = images.to(device)
+                outputs = model_2026(images)
+                preds   = outputs.argmax(dim=1).cpu().numpy()
+                run_preds.extend([int_to_class[p] for p in preds])
+
+        submission_dir  = "../submissions_CNN"
+        os.makedirs(submission_dir, exist_ok=True)
+        submission_path = f"{submission_dir}/{run_name}_seed2026_submission.csv"
+        pd.DataFrame({"filename": test_filenames, "label": run_preds}).to_csv(submission_path, index=False)
+        print(f"Submission saved: {submission_path}")
+
+        submit_to_kaggle(
+            file_path=submission_path,
+            message=f"{run_name} seed=2026 F1={f1:.4f}"
+        )
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_ckpt_info = {
+                "run_name" : run_name,
+                "seed"     : 2026,
+                "ckpt_path": ckpt_path,
+                "model_fn" : model_fn,
+                "loss_name": "cross_entropy",
+            }
+else:
+    print(f"[INFO] {ckpt_2026_dir} not found, skipping seed 2026")
+
+print(f"\nBest overall: {best_ckpt_info['run_name']} "
+      f"(seed={best_ckpt_info['seed']}, F1-macro={best_f1:.4f})")
