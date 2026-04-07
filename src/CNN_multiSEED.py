@@ -30,7 +30,7 @@ from submission_script import submit_to_kaggle
 # CONFIG
 # =============================================================================
 
-SEEDS = [1, 12345, 42, 50]
+SEEDS = [0, 1, 1010, 42]
 
 PATH        = "../aca-butterflies"
 NUM_CLASSES = 75
@@ -41,6 +41,11 @@ PATIENCE    = 7
 
 RGB_MEAN = [0.4790, 0.4646, 0.3369]
 RGB_STD  = [0.2560, 0.2462, 0.2558]
+
+# since we are using pre trained NN we decided to normalize it using this values 
+# discussion of value origin can be found here https://github.com/pytorch/vision/pull/1965
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD  = [0.229, 0.224, 0.225]
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
@@ -279,12 +284,12 @@ def build_criterion(name):
 # =============================================================================
 # EXPERIMENTS — top-3 models from seed 2026
 # =============================================================================
-
+# last parameter -> flag_pretrained
 experiments = [
-    ("alexnet_pre_cel_adam",    lambda: AlexNetPretrained(), "cross_entropy", "adam",    1e-4, 30),
-    ("vgg16_pre_cel_adam",      lambda: VGG16Pretrained(),   "cross_entropy", "adam",    1e-4, 30),
-    ("vgg16_pre_cel_rmsprop",   lambda: VGG16Pretrained(),   "cross_entropy", "rmsprop", 1e-4, 30),
-    ("alexnet_pre_cel_rmsprop", lambda: AlexNetPretrained(), "cross_entropy", "rmsprop", 1e-4, 30),
+    ("alexnet_pre_cel_adam",    lambda: AlexNetPretrained(), "cross_entropy", "adam",    1e-4, 30, 1),
+    ("vgg16_pre_cel_adam",      lambda: VGG16Pretrained(),   "cross_entropy", "adam",    1e-4, 30, 1),
+    ("vgg16_pre_cel_rmsprop",   lambda: VGG16Pretrained(),   "cross_entropy", "rmsprop", 1e-4, 30, 1),
+    ("alexnet_pre_cel_rmsprop", lambda: AlexNetPretrained(), "cross_entropy", "rmsprop", 1e-4, 30, 1),
 ]
 
 # =============================================================================
@@ -328,6 +333,8 @@ for SEED in SEEDS:
     torch.backends.cudnn.benchmark = False
 
     train_transform, val_transform = build_transforms(RGB_MEAN, RGB_STD)
+    train_transform_pre_trained, val_transform_pre_trained = build_transforms(IMAGENET_MEAN, IMAGENET_STD)
+
 
     img_dir = os.path.join(PATH, "train")
     df = pd.read_csv(os.path.join(PATH, "train.csv"))
@@ -340,6 +347,9 @@ for SEED in SEEDS:
     train_dataset = ButterflyDataset(df_train, img_dir, train_transform, idx_to_class)
     val_dataset   = ButterflyDataset(df_val,   img_dir, val_transform,   idx_to_class)
 
+    train_dataset_pretrained = ButterflyDataset(df_train, img_dir, train_transform_pre_trained, idx_to_class)
+    val_dataset_pretrained = ButterflyDataset(df_val, img_dir, val_transform_pre_trained, idx_to_class)
+
     train_loader = data.DataLoader(
         train_dataset, batch_size=BATCH_SIZE, shuffle=True,
         num_workers=0, pin_memory=False
@@ -349,12 +359,29 @@ for SEED in SEEDS:
         num_workers=0, pin_memory=False
     )
 
+    train_loader_pretrained = data.DataLoader(
+    train_dataset_pretrained, 
+    batch_size=BATCH_SIZE, 
+    shuffle=True, 
+    num_workers=0,            # Alterar para 0 para evitar Broken pipe
+    pin_memory=False,         # Correto: Manter False para Memória Unificada
+    # persistent_workers e prefetch_factor não são necessários com num_workers=0
+)
+
+    val_loader_pretrained = data.DataLoader(
+        val_dataset_pretrained, 
+        batch_size=BATCH_SIZE, 
+        shuffle=False, 
+        num_workers=0,            # Alterar para 0
+        pin_memory=False
+    )
+
     results_summary = []
     trained_models  = {}
     all_histories   = {}
     all_times       = {}
 
-    for run_name, model_fn, loss_name, optim_name, lr, epochs in experiments:
+    for run_name, model_fn, loss_name, optim_name, lr, epochs, flag_pretrained in experiments:
         print(f"\n{'='*60}")
         print(f"Run: {run_name}")
         print(f"Loss: {loss_name}  |  Optimizer: {optim_name}  |  LR: {lr}")
@@ -366,11 +393,18 @@ for SEED in SEEDS:
         model     = model_fn().to(run_device)
         criterion = build_criterion(loss_name)
         optimizer = build_optimizer(optim_name, model.parameters(), lr=lr)
+
+        if flag_pretrained:
+            train_loader_use = train_loader_pretrained
+            val_loader_use = val_loader_pretrained
+        else:
+            train_loader_use = train_loader
+            val_loader_use = val_loader
         
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr * 0.01)
 
         model, history, time_var = train_model(
-            model, train_loader, val_loader, 
+            model, train_loader_use, val_loader_use, 
             criterion, optimizer, 
             scheduler=scheduler, 
             device=run_device, 
@@ -378,7 +412,7 @@ for SEED in SEEDS:
             num_epochs=epochs
         )
 
-        _, _, labels, preds = evaluate(model, val_loader, criterion, run_device)
+        _, _, labels, preds = evaluate(model, val_loader_use, criterion, run_device)
         metrics = compute_metrics(labels, preds, name=run_name)
 
         results_summary.append({
