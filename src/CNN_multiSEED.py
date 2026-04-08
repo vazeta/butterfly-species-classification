@@ -479,13 +479,13 @@ for SEED in SEEDS:
 
         submission_dir  = "../submissions_CNN"
         os.makedirs(submission_dir, exist_ok=True)
-        submission_path = f"{submission_dir}/{run_name}_seed{SEED}_submission.csv"
+        submission_path = f"{submission_dir}/{run_name}_seed_{SEED}_submission.csv"
         pd.DataFrame({"filename": test_filenames, "label": run_preds}).to_csv(submission_path, index=False)
         print(f"Submission saved: {submission_path}")
 
         submit_to_kaggle(
             file_path=submission_path,
-            message=f"{run_name} seed={SEED} F1={metrics['f1_macro']:.4f}"
+            message=f"{run_name}->{SEED} F1={metrics['f1_macro']:.4f}"
         )
 
     print("\n TEMPOS DE EXECUÇÃO:")
