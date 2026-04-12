@@ -6,7 +6,7 @@ import random
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")  # no display needed when running as .py
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 from PIL import Image
@@ -24,11 +24,8 @@ from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classifi
 from dataset_utilsCNN import ButterflyDataset
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../support"))
-from submission_script import submit_to_kaggle
+from submission_function import submit_to_kaggle
 
-# =============================================================================
-# CONFIG
-# =============================================================================
 
 SEEDS = [0, 1, 1010, 42]
 
@@ -54,9 +51,6 @@ elif torch.cuda.is_available():
 else:
     device = torch.device("cpu")
 
-# =============================================================================
-# TRANSFORMS
-# =============================================================================
 
 def build_transforms(mean, std, image_size=IMAGE_SIZE):
     train = transforms.Compose([
@@ -78,9 +72,6 @@ def build_transforms(mean, std, image_size=IMAGE_SIZE):
     
     return train, val
 
-# =============================================================================
-# TRAINING
-# =============================================================================
 
 def train_epoch(model, loader, criterion, optimizer, device):
     model.train()
@@ -175,9 +166,6 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
     model.load_state_dict(best_weights)
     return model, history, elapsed_in_min
 
-# =============================================================================
-# METRICS & PLOTS
-# =============================================================================
 
 def compute_metrics(labels, preds, name=""):
     acc = accuracy_score(labels, preds)
@@ -214,9 +202,6 @@ def plot_history(history, title="Training History", save_path=None):
         plt.savefig(save_path)
     plt.close()
 
-# =============================================================================
-# MODELS
-# =============================================================================
 
 class AlexNetPretrained(nn.Module):
     def __init__(self, num_classes=NUM_CLASSES):
@@ -265,9 +250,6 @@ class VGG16Pretrained(nn.Module):
         x = self.classifier(x)
         return x
 
-# =============================================================================
-# CRITERION & OPTIMIZER
-# =============================================================================
 
 def build_optimizer(name, params, lr, weight_decay=1e-4):
     if name == "adam":
@@ -281,9 +263,7 @@ def build_criterion(name):
     elif name == "multi_margin":
         return nn.MultiMarginLoss(margin=1.0)
 
-# =============================================================================
-# EXPERIMENTS — top-3 models from seed 2026
-# =============================================================================
+
 # last parameter -> flag_pretrained
 experiments = [
     ("alexnet_pre_cel_adam",    lambda: AlexNetPretrained(), "cross_entropy", "adam",    1e-4, 30, 1),
@@ -292,9 +272,6 @@ experiments = [
     ("alexnet_pre_cel_rmsprop", lambda: AlexNetPretrained(), "cross_entropy", "rmsprop", 1e-4, 30, 1),
 ]
 
-# =============================================================================
-# TEST DATASET (used for per-run submissions)
-# =============================================================================
 
 class TestDataset(data.Dataset):
     def __init__(self, filenames, img_dir, transform=None):
@@ -312,9 +289,6 @@ class TestDataset(data.Dataset):
             image = self.transform(image)
         return image
 
-# =============================================================================
-# MAIN LOOP
-# =============================================================================
 
 all_results    = []
 best_f1        = -1.0
@@ -363,16 +337,15 @@ for SEED in SEEDS:
     train_dataset_pretrained, 
     batch_size=BATCH_SIZE, 
     shuffle=True, 
-    num_workers=0,            # Alterar para 0 para evitar Broken pipe
-    pin_memory=False,         # Correto: Manter False para Memória Unificada
-    # persistent_workers e prefetch_factor não são necessários com num_workers=0
+    num_workers=0,
+    pin_memory=False,
 )
 
     val_loader_pretrained = data.DataLoader(
         val_dataset_pretrained, 
         batch_size=BATCH_SIZE, 
         shuffle=False, 
-        num_workers=0,            # Alterar para 0
+        num_workers=0,  # Alterar para 0 no M2
         pin_memory=False
     )
 
@@ -444,7 +417,6 @@ for SEED in SEEDS:
         plot_history(history, title=run_name,
                      save_path=f"{checkpoint_path}/{run_name}_seed{SEED}_history.png")
 
-        # Track best checkpoint globally
         if metrics["f1_macro"] > best_f1:
             best_f1 = metrics["f1_macro"]
             best_ckpt_info = {
@@ -455,7 +427,6 @@ for SEED in SEEDS:
                 "loss_name": loss_name,
             }
 
-        # Submit this run to Kaggle
         df_full      = pd.read_csv(os.path.join(PATH, "train.csv"))
         all_classes  = sorted(df_full["label"].unique())
         idx_to_class = {cls: idx for idx, cls in enumerate(all_classes)}
@@ -492,18 +463,12 @@ for SEED in SEEDS:
     for key, value in all_times.items():
         print(f"{key} -> {value:.2f} min")
 
-# =============================================================================
-# FULL RESULTS SUMMARY
-# =============================================================================
 
 results_df = pd.DataFrame(all_results)
 results_df.to_csv("../checkpoints_CNN/seed_experiments_results.csv", index=False)
 print("\n\nFULL RESULTS:")
 print(results_df.to_string(index=False))
 
-# =============================================================================
-# SEED 2026 — load existing checkpoints, generate submissions, compare
-# =============================================================================
 
 ckpt_2026_dir   = "../checkpoints_CNN/checkpoints_2026"
 relevant_2026   = {
@@ -532,7 +497,6 @@ if os.path.exists(ckpt_2026_dir):
         f1    = ckpt["metrics"]["f1_macro"]
         print(f"[Seed 2026] {run_name} -> F1-macro: {f1:.4f}")
 
-        # Generate submission for this checkpoint
         model_2026 = model_fn().to(device)
         model_2026.load_state_dict(ckpt["model_state"])
         model_2026.eval()

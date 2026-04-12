@@ -13,9 +13,6 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.models as models
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 
 def submit_to_kaggle(file_path, message, competition="aca-butterflies"):
     try:
@@ -57,17 +54,13 @@ RGB_STD  = [0.2560, 0.2462, 0.2558]
 
 SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---------------------------------------------------------------------------
-# Class mapping
-# ---------------------------------------------------------------------------
+
 df_train_full = pd.read_csv(os.path.join(PATH, "train.csv"))
 all_classes   = sorted(df_train_full["label"].unique())
 class_to_idx  = {cls: idx for idx, cls in enumerate(all_classes)}
 idx_to_class  = {idx: cls for cls, idx in class_to_idx.items()}
 
-# ---------------------------------------------------------------------------
-# Transforms
-# ---------------------------------------------------------------------------
+
 def val_transform(mean, std):
     return transforms.Compose([
         transforms.Resize(256),
@@ -79,9 +72,7 @@ def val_transform(mean, std):
 transform_rgb      = val_transform(RGB_MEAN,      RGB_STD)
 transform_imagenet = val_transform(IMAGENET_MEAN, IMAGENET_STD)
 
-# ---------------------------------------------------------------------------
-# Dataset
-# ---------------------------------------------------------------------------
+
 class ButterflyTestDataset(data.Dataset):
     def __init__(self, img_dir, filenames, transform=None):
         self.img_dir   = img_dir
@@ -98,9 +89,6 @@ class ButterflyTestDataset(data.Dataset):
             image = self.transform(image)
         return image, self.filenames[idx]
 
-# ---------------------------------------------------------------------------
-# Model definitions — must match exactly what was saved in each checkpoint
-# ---------------------------------------------------------------------------
 
 class AlexNet(nn.Module):
     def __init__(self, num_classes=NUM_CLASSES):
@@ -204,7 +192,6 @@ class ModernLeNet(nn.Module):
         return self.fc2(x)
 
 
-# longest prefix first so alexnet_pre doesn't match as alexnet
 ARCH_REGISTRY = {
     "alexnet_pre" : (AlexNetPretrained, True),
     "alexnet_opt" : (AlexNetOptimized,  False),
@@ -222,9 +209,7 @@ def build_model_from_run_name(stem: str) -> tuple:
             return model_cls(num_classes=NUM_CLASSES), transform
     raise ValueError(f"Unknown architecture for stem: {stem}")
 
-# ---------------------------------------------------------------------------
-# Inference
-# ---------------------------------------------------------------------------
+
 @torch.no_grad()
 def generate_submission(model, transform, test_dir, output_path):
     filenames = sorted(os.listdir(test_dir))
@@ -245,9 +230,7 @@ def generate_submission(model, transform, test_dir, output_path):
     print(f"  saved -> {output_path}  ({len(df_sub)} samples)")
     return df_sub
 
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
+
 test_dir = os.path.join(PATH, "test")
 skipped  = []
 
@@ -258,7 +241,6 @@ for seed_folder in sorted(CHECKPOINTS_ROOT.iterdir()):
     seed = m.group(1)
 
     for pt_path in sorted(seed_folder.glob("*.pt")):
-        # normalise run name (strip _seed{N} suffix present in non-2026 folders)
         run_name = re.sub(r"_seed\d+$", "", pt_path.stem)
         out_path = SUBMISSIONS_DIR / f"submission_cnn_{seed}_{run_name}.csv"
 
