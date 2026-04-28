@@ -1,6 +1,6 @@
 # Butterfly Species Classification
 
-Image classification across 75 butterfly species using custom CNNs andpretrained ResNet architectures.
+Image classification across 75 butterfly species using custom CNNs and pretrained ResNet architectures.
 
 Evaluated via a [Kaggle competition](https://www.kaggle.com/t/cec697fd182d434d978d54c05b7a0018),
 with systematic experiments across loss functions, optimizers, and learning
